@@ -4,7 +4,7 @@
 .\objects\stm32f10x_iwdg.o: .\start\core_cm3.h
 .\objects\stm32f10x_iwdg.o: D:\keil5\ARM\ARMCC\Bin\..\include\stdint.h
 .\objects\stm32f10x_iwdg.o: .\start\system_stm32f10x.h
-.\objects\stm32f10x_iwdg.o: .\User\stm32f10x_conf.h
+.\objects\stm32f10x_iwdg.o: .\Syscall\stm32f10x_conf.h
 .\objects\stm32f10x_iwdg.o: .\Libary\stm32f10x_adc.h
 .\objects\stm32f10x_iwdg.o: .\start\stm32f10x.h
 .\objects\stm32f10x_iwdg.o: .\Libary\stm32f10x_bkp.h

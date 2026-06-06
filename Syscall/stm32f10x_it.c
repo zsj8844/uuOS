@@ -1,160 +1,85 @@
 /**
-  ******************************************************************************
-  * @file    Project/STM32F10x_StdPeriph_Template/stm32f10x_it.c 
-  * @author  MCD Application Team
-  * @version V3.5.0
-  * @date    08-April-2011
-  * @brief   Main Interrupt Service Routines.
-  *          This file provides template for all exceptions handler and 
-  *          peripherals interrupt service routine.
-  ******************************************************************************
-  * @attention
+  * @file    Syscall/stm32f10x_it.c
+  * @brief   内核态代码 —— SVC 提权铁闸 + 内核服务函数
   *
-  * THE PRESENT FIRMWARE WHICH IS FOR GUIDANCE ONLY AIMS AT PROVIDING CUSTOMERS
-  * WITH CODING INFORMATION REGARDING THEIR PRODUCTS IN ORDER FOR THEM TO SAVE
-  * TIME. AS A RESULT, STMICROELECTRONICS SHALL NOT BE HELD LIABLE FOR ANY
-  * DIRECT, INDIRECT OR CONSEQUENTIAL DAMAGES WITH RESPECT TO ANY CLAIMS ARISING
-  * FROM THE CONTENT OF SUCH FIRMWARE AND/OR THE USE MADE BY CUSTOMERS OF THE
-  * CODING INFORMATION CONTAINED HEREIN IN CONNECTION WITH THEIR PRODUCTS.
-  *
-  * <h2><center>&copy; COPYRIGHT 2011 STMicroelectronics</center></h2>
-  ******************************************************************************
+  *          SVC_Handler:  汇编铁闸, 区分 MSP/PSP, 跳转 SVC_Router
+  *          SVC_Router:   解析 SVC 立即数, 分发到内核服务
+  *          Kernel_*:     运行在 Handler Mode (Privileged), 直接操作硬件
   */
-
-/* Includes ------------------------------------------------------------------*/
+// 中断处理函数的实现
 #include "stm32f10x_it.h"
+#include "syscall.h"
 
-/** @addtogroup STM32F10x_StdPeriph_Template
-  * @{
-  */
+/* ── 前向声明 ── */
+static void Kernel_GPIO_Set(GPIO_TypeDef *port, uint16_t pin);
+static void Kernel_GPIO_Reset(GPIO_TypeDef *port, uint16_t pin);
+static void Kernel_DelayMs(uint32_t ms);
 
-/* Private typedef -----------------------------------------------------------*/
-/* Private define ------------------------------------------------------------*/
-/* Private macro -------------------------------------------------------------*/
-/* Private variables ---------------------------------------------------------*/
-/* Private function prototypes -----------------------------------------------*/
-/* Private functions ---------------------------------------------------------*/
-
-/******************************************************************************/
-/*            Cortex-M3 Processor Exceptions Handlers                         */
-/******************************************************************************/
-
-/**
-  * @brief  This function handles NMI exception.
-  * @param  None
-  * @retval None
-  */
-void NMI_Handler(void)
+/*═════════════════════════════════════════════════════════════
+ * L1: SVC 路由分发器
+ *═════════════════════════════════════════════════════════════*/
+void SVC_Router(uint32_t *pStackFrame)
 {
+    uint8_t svc_num = *((uint8_t *)pStackFrame[6] - 2);  /* PC[-2] = SVC 立即数 */
+
+    switch (svc_num)
+    {
+        case SVC_ID_GPIO_SET:   /* R0=port, R1=pin */
+            Kernel_GPIO_Set((GPIO_TypeDef *)pStackFrame[0], (uint16_t)pStackFrame[1]);
+            break;
+        case SVC_ID_GPIO_RESET: /* R0=port, R1=pin */
+            Kernel_GPIO_Reset((GPIO_TypeDef *)pStackFrame[0], (uint16_t)pStackFrame[1]);
+            break;
+        case SVC_ID_DELAY_MS:   /* R0=ms */
+            Kernel_DelayMs(pStackFrame[0]);
+            break;
+        default:
+            break;
+    }
 }
 
-/**
-  * @brief  This function handles Hard Fault exception.
-  * @param  None
-  * @retval None
-  */
-void HardFault_Handler(void)
+/*═════════════════════════════════════════════════════════════
+ * L0: SVC_Handler 汇编铁闸 (用户态→内核态唯一通道)
+ *═════════════════════════════════════════════════════════════*/
+__asm void SVC_Handler(void)
 {
-  /* Go to infinite loop when Hard Fault exception occurs */
-  while (1)
-  {
-  }
+    IMPORT  SVC_Router
+    TST     LR, #4
+    ITE     EQ
+    MRSEQ   R0, MSP
+    MRSNE   R0, PSP
+    B       SVC_Router
+    ALIGN
 }
 
-/**
-  * @brief  This function handles Memory Manage exception.
-  * @param  None
-  * @retval None
-  */
-void MemManage_Handler(void)
+/*═════════════════════════════════════════════════════════════
+ * 其他异常 (保留骨架)
+ *═════════════════════════════════════════════════════════════*/
+void NMI_Handler(void)        { while(1); }
+void HardFault_Handler(void)  { while(1); }
+void MemManage_Handler(void)  { while(1); }
+void BusFault_Handler(void)   { while(1); }
+void UsageFault_Handler(void) { while(1); }
+void DebugMon_Handler(void)   { }
+void PendSV_Handler(void)     { }
+void SysTick_Handler(void)    { }
+
+/*═════════════════════════════════════════════════════════════
+ * L2: 内核服务函数 (Handler Mode, Privileged)
+ *═════════════════════════════════════════════════════════════*/
+static void Kernel_GPIO_Set(GPIO_TypeDef *port, uint16_t pin)
 {
-  /* Go to infinite loop when Memory Manage exception occurs */
-  while (1)
-  {
-  }
+    if (port) port->BSRR = pin;
 }
 
-/**
-  * @brief  This function handles Bus Fault exception.
-  * @param  None
-  * @retval None
-  */
-void BusFault_Handler(void)
+static void Kernel_GPIO_Reset(GPIO_TypeDef *port, uint16_t pin)
 {
-  /* Go to infinite loop when Bus Fault exception occurs */
-  while (1)
-  {
-  }
+    if (port) port->BRR = pin;
 }
 
-/**
-  * @brief  This function handles Usage Fault exception.
-  * @param  None
-  * @retval None
-  */
-void UsageFault_Handler(void)
+static void Kernel_DelayMs(uint32_t ms)
 {
-  /* Go to infinite loop when Usage Fault exception occurs */
-  while (1)
-  {
-  }
+    while (ms--) {
+        for (volatile uint32_t i = 0; i < 7200; i++) __NOP();
+    }
 }
-
-/**
-  * @brief  This function handles SVCall exception.
-  * @param  None
-  * @retval None
-  */
-void SVC_Handler(void)
-{
-}
-
-/**
-  * @brief  This function handles Debug Monitor exception.
-  * @param  None
-  * @retval None
-  */
-void DebugMon_Handler(void)
-{
-}
-
-/**
-  * @brief  This function handles PendSVC exception.
-  * @param  None
-  * @retval None
-  */
-void PendSV_Handler(void)
-{
-}
-
-/**
-  * @brief  This function handles SysTick Handler.
-  * @param  None
-  * @retval None
-  */
-void SysTick_Handler(void)
-{
-}
-
-/******************************************************************************/
-/*                 STM32F10x Peripherals Interrupt Handlers                   */
-/*  Add here the Interrupt Handler for the used peripheral(s) (PPP), for the  */
-/*  available peripheral interrupt handler's name please refer to the startup */
-/*  file (startup_stm32f10x_xx.s).                                            */
-/******************************************************************************/
-
-/**
-  * @brief  This function handles PPP interrupt request.
-  * @param  None
-  * @retval None
-  */
-/*void PPP_IRQHandler(void)
-{
-}*/
-
-/**
-  * @}
-  */ 
-
-
-/******************* (C) COPYRIGHT 2011 STMicroelectronics *****END OF FILE****/

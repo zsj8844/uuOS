@@ -336,7 +336,7 @@
               <MiscControls></MiscControls>
               <Define>USE_STDPERIPH_DRIVER</Define>
               <Undefine></Undefine>
-              <IncludePath>.\start;.\User;.\Libary</IncludePath>
+              <IncludePath>.\start;.\User;.\Libary;.\Syscall</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -648,27 +648,32 @@
           </Files>
         </Group>
         <Group>
-          <GroupName>User</GroupName>
+          <GroupName>Syscall</GroupName>
           <Files>
-            <File>
-              <FileName>main.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\User\main.c</FilePath>
-            </File>
             <File>
               <FileName>stm32f10x_conf.h</FileName>
               <FileType>5</FileType>
-              <FilePath>.\User\stm32f10x_conf.h</FilePath>
-            </File>
-            <File>
-              <FileName>stm32f10x_it.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\User\stm32f10x_it.c</FilePath>
+              <FilePath>.\Syscall\stm32f10x_conf.h</FilePath>
             </File>
             <File>
               <FileName>stm32f10x_it.h</FileName>
               <FileType>5</FileType>
-              <FilePath>.\User\stm32f10x_it.h</FilePath>
+              <FilePath>.\Syscall\stm32f10x_it.h</FilePath>
+            </File>
+            <File>
+              <FileName>syscall.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Syscall\syscall.h</FilePath>
+            </File>
+            <File>
+              <FileName>main.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Syscall\main.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f10x_it.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Syscall\stm32f10x_it.c</FilePath>
             </File>
           </Files>
         </Group>
