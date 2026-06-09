@@ -47,8 +47,8 @@ void __svc(SVC_ID_READ_TASK)  sys_ReadTask(uint32_t buf, uint32_t len);
 /** 写入数据: buf→明文数据, len→长度 (Demo: LED闪3次) */
 void __svc(SVC_ID_WRITE_DATA) sys_WriteData(uint32_t buf, uint32_t len);
 
-/** 握手挑战: challenge→鉴别码 (Demo: LED闪4次) */
-void __svc(SVC_ID_READ_SHAKE) sys_ReadShake(uint32_t challenge);
+/** 握手挑战: buf→挑战数据指针, len→长度 (原型≥16字节, ledemo自测验证) */
+void __svc(SVC_ID_READ_SHAKE) sys_ReadShake(uint32_t buf, uint32_t len);
 
 /** 读取数据: buf→缓冲区, len→长度 (Demo: LED闪5次) */
 void __svc(SVC_ID_READ_DATA)  sys_ReadData(uint32_t buf, uint32_t len);

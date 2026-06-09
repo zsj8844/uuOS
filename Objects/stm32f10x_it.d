@@ -30,3 +30,5 @@
 .\objects\stm32f10x_it.o: .\Libary\stm32f10x_wwdg.h
 .\objects\stm32f10x_it.o: .\Libary\misc.h
 .\objects\stm32f10x_it.o: Syscall\syscall.h
+.\objects\stm32f10x_it.o: Syscall\sec_core.h
+.\objects\stm32f10x_it.o: D:\software\Keil_v5\ARM\ARMCC\Bin\..\include\string.h

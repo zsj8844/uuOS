@@ -677,6 +677,21 @@
               <FileType>1</FileType>
               <FilePath>.\Syscall\stm32f10x_it.c</FilePath>
             </File>
+            <File>
+              <FileName>sec_core.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Syscall\sec_core.c</FilePath>
+            </File>
+            <File>
+              <FileName>sec_core.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Syscall\sec_core.h</FilePath>
+            </File>
+            <File>
+              <FileName>usb_hid.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Syscall\usb_hid.c</FilePath>
+            </File>
           </Files>
         </Group>
       </Groups>
