@@ -9,6 +9,7 @@
 #include "stm32f10x_it.h"
 #include "syscall.h"
 #include "sec_core.h"
+#include "rgb_led.h"
 #include <string.h>
 
 /* ── 前向声明 ── */
@@ -125,16 +126,11 @@ static void Kernel_DelayMs(uint32_t ms)
  *     - 数据泵出由 sd_raw_read_sector() 实现
  *═════════════════════════════════════════════════════════════*/
 
-/** LED 快速闪烁 n 次 (内核态直接操作硬件, 不经过 SVC) */
+/** LED 快速闪烁 n 次 (内核态, 通过RGB模块) */
 static void Kernel_BlinkN(uint32_t n)
 {
-    while (n--)
-    {
-        GPIOC->BRR  = GPIO_Pin_13;              /* 亮 */
-        for (volatile uint32_t i = 0; i < 360000; i++) __NOP();  /* ~500ms */
-        GPIOC->BSRR = GPIO_Pin_13;              /* 灭 */
-        for (volatile uint32_t i = 0; i < 360000; i++) __NOP();  /* ~500ms */
-    }
+    /* 白色 = 通用信号 */
+    RGB_BlinkN(n, 500, 500, BRIGHT_FULL, BRIGHT_FULL, BRIGHT_FULL);
 }
 
 static void Kernel_WriteTask(uint32_t buf, uint32_t len)
@@ -155,16 +151,10 @@ static void Kernel_WriteData(uint32_t buf, uint32_t len)
     (void)buf; (void)len;
 }
 
-/** PANIC 红灯爆闪 (快速闪烁, 不退出) */
+/** PANIC 红灯爆闪 (永不返回) */
 static void Kernel_PanicBlink(void)
 {
-    while (1)
-    {
-        GPIOC->BRR  = GPIO_Pin_13;
-        for (volatile uint32_t i = 0; i < 120000; i++) __NOP();  /* ~150ms */
-        GPIOC->BSRR = GPIO_Pin_13;
-        for (volatile uint32_t i = 0; i < 120000; i++) __NOP();  /* ~150ms */
-    }
+    RGB_PanicLoop();
 }
 
 /**
@@ -207,9 +197,8 @@ static void Kernel_ReadShake(uint32_t buf, uint32_t len)
     SecCore_MemZero(challenge, sizeof(challenge));
 
     if (result == 0) {
-        /* 验证通过 → STATE_READ_ALLOW, 绿灯爆闪 4 次 */
+        /* 验证通过 → STATE_READ_ALLOW, 绿灯慢闪 4 次×2 */
         Kernel_BlinkN(4);
-        /* 延长亮灭间隔以示与失败的区别 */
         for (volatile uint32_t i = 0; i < 720000; i++) __NOP();
         Kernel_BlinkN(4);
     } else {
@@ -218,10 +207,8 @@ static void Kernel_ReadShake(uint32_t buf, uint32_t len)
             /* 已达失败上限 → 自毁死锁 */
             Kernel_PanicBlink();
         } else {
-            /* 失败但未达上限 → 快闪 1 次报错 */
-            GPIOC->BRR  = GPIO_Pin_13;
-            for (volatile uint32_t i = 0; i < 120000; i++) __NOP();
-            GPIOC->BSRR = GPIO_Pin_13;
+            /* 失败但未达上限 → 红灯快闪 1 次 */
+            RGB_BlinkN(1, 50, 50, BRIGHT_FULL, 0, 0);
             for (volatile uint32_t i = 0; i < 720000; i++) __NOP();
         }
     }
@@ -236,11 +223,8 @@ static void Kernel_ReadData(uint32_t buf, uint32_t len)
 {
     /* 状态机门控: 仅 STATE_READ_ALLOW 允许数据回读 */
     if (!SecCore_IsReadAllowed()) {
-        /* 门控拒绝: 快闪 2 次警告 */
-        Kernel_BlinkN(1);
-        GPIOC->BRR  = GPIO_Pin_13;
-        for (volatile uint32_t i = 0; i < 120000; i++) __NOP();
-        GPIOC->BSRR = GPIO_Pin_13;
+        /* 门控拒绝: 红灯快闪 2 次警告 */
+        RGB_BlinkN(2, 50, 50, BRIGHT_FULL, 0, 0);
         return;
     }
 
