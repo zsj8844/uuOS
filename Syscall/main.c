@@ -16,6 +16,7 @@
 #include <string.h>
 
 extern void sha256_direct(const uint8_t *d, uint32_t len, uint8_t *out);
+extern volatile uint32_t g_rx_byte_count;
 
 /* 域标识 */
 #define DOMAIN_NONE       0
@@ -27,7 +28,7 @@ extern void sha256_direct(const uint8_t *d, uint32_t len, uint8_t *out);
  *══════════════════════════════════════════════════════════*/
 int main(void)
 {
-    uint8_t  frame[256];
+    uint8_t  frame[256];    
     uint8_t  cmd, len;
     uint8_t  hs_done      = 0;
     uint8_t  task_ok      = 0;
@@ -38,6 +39,12 @@ int main(void)
     RGB_Init();
     SecCore_Init();
     CH340_Comm_Init();
+
+    /* ── SysTick 1ms 定时器 ── */
+    if (SysTick_Config(SystemCoreClock / 1000)) {
+        /* 配置失败 (SystemCoreClock/1000 > 0xFFFFFF) — 死等 */
+        while (1);
+    }
 
     /* ── SHA-256 + HMAC 自测 ── */
     {
@@ -62,7 +69,6 @@ int main(void)
     }
 
     /* ── 发 Hello (不设 domain, nonce_s 仅 16 字节) ── */
-    g_FerryState = STATE_LOCK;
     SecCore_StartHandshake();
 
     CH340_Comm_Send(FRAME_CMD_HELLO, (const uint8_t *)g_NonceDev, 16);
@@ -96,6 +102,29 @@ int main(void)
             }
         }
 
+        /* 检测 CH340 断线 → 自动复位握手状态 (热插拔支持) */
+        {
+            static uint32_t last_byte_count = 0;
+            static uint32_t idle_ticks      = 0;
+            if (g_rx_byte_count != last_byte_count) {
+                last_byte_count = g_rx_byte_count;
+                idle_ticks      = 0;
+            } else {
+                idle_ticks++;
+            }
+            /* 2 秒无数据 → 认为 CH340 已断开 → 重置握手 */
+            if (hs_done && idle_ticks > 6000) {
+                hs_done       = 0;
+                task_ok       = 0;
+                data_pending  = 0;
+                my_domain     = DOMAIN_NONE;
+                g_ChallengeFailCount = 0;
+                SecCore_MemZero(g_SessionSK, SK_SIZE);
+                SecCore_StartHandshake();
+                idle_ticks    = 0;
+            }
+        }
+
         /* 轮询接收帧 */
         if (!CH340_Comm_Recv(&cmd, frame, &len)) {
             continue;
@@ -122,7 +151,6 @@ int main(void)
                 } else {
                     /* 重置失败计数, 再试 MK_DATA */
                     g_ChallengeFailCount = 0;
-                    g_FerryState = STATE_LOCK;
 
                     result = SecCore_VerifyHandshake(
                         frame, 48,
@@ -137,11 +165,6 @@ int main(void)
                     frame[0] = 0x01;
                     CH340_Comm_Send(FRAME_CMD_ACK, frame, 1);
                     hs_done = 1;
-
-                    /* RGB: 密网=蓝灯, 工控=绿灯 */
-                    g_FerryState = (my_domain == DOMAIN_SECRET)
-                                   ? STATE_INIT       /* 蓝灯常亮 */
-                                   : STATE_ASSIGNED;  /* 绿灯慢闪 */
 
                     /* PC13 LED: 密网=5下, 工控=3下 */
                     int blinks = (my_domain == DOMAIN_SECRET) ? 5 : 3;
@@ -165,7 +188,6 @@ int main(void)
                         for(volatile uint32_t d=0;d<720000;d++)__NOP();
                     }
                     SecCore_MemZero(g_SessionSK, SK_SIZE);
-                    g_FerryState = STATE_LOCK;
                     SecCore_StartHandshake();
                     CH340_Comm_Send(FRAME_CMD_HELLO,
                                     (const uint8_t *)g_NonceDev, 16);
@@ -186,26 +208,24 @@ int main(void)
                 task_ok = 1;
                 RGB_BlinkN(2, 200, 200, 0, BRIGHT_FULL, 0);
                 SecCore_MemZero(g_SessionSK, SK_SIZE);
-                g_FerryState = STATE_INIT;
+                /* g_FerryState 由 Kernel_WriteTask 设为 STATE_ASSIGNED (蓝灯) */
                 hs_done = 1;
             }
 
             /* ── 阶段2: 解密回传 (CMD 0x19 → CMD 0x1A) ── */
             if (cmd == FRAME_CMD_READ_SHAKE) {
-                /*
-                 * PC 发解密指令 (含目标密文ID, SK1' 加密)
-                 * Kernel_ReadShake 验证 → 解密模块使能
-                 *   raw = AES-GCM-Dec(MK_DATA, inner)
-                 *   outer = AES-GCM-Enc(SK1', raw)
-                 *   通过 CMD 0x1A 泵出
-                 */
                 sys_ReadShake((uint32_t)frame, len);
                 sys_ReadData((uint32_t)frame, len);
-                CH340_Comm_Send(FRAME_CMD_READ_DATA, frame, 0);
+                /* 回传从扇区泵出的密文数据 */
+                {
+                    uint8_t send_len = (g_DataWriteLen > 512) ? 255 : (uint8_t)g_DataWriteLen;
+                    if (send_len == 0) send_len = 16; /* 无数据时发最小对齐块 */
+                    CH340_Comm_Send(FRAME_CMD_READ_DATA, g_ReadOutBuf, send_len);
+                }
                 task_ok = 1;
                 RGB_BlinkN(2, 200, 200, 0, BRIGHT_FULL, 0);
                 SecCore_MemZero(g_SessionSK, SK_SIZE);
-                g_FerryState = STATE_INIT;
+                /* g_FerryState 由 Kernel_ReadShake 设为 STATE_READ_ALLOW (紫灯) */
                 hs_done = 1;
             }
         }
@@ -218,7 +238,8 @@ int main(void)
             /* Step 1: 握手完成后发送数据请求 */
             if (!data_pending) {
                 sys_ReadTask(0, 0);         /* SVC 0x11: 读取预存任务 */
-                CH340_Comm_Send(FRAME_CMD_READ_TASK, frame, 0);
+                /* 回传 Sector 1024 中的任务暗号 */
+                CH340_Comm_Send(FRAME_CMD_READ_TASK, g_ReadOutBuf, 255);
                 RGB_BlinkN(3, 200, 200, 0, BRIGHT_FULL, 0);
                 data_pending = 1;
             }
@@ -233,7 +254,7 @@ int main(void)
                 task_ok = 1;
                 RGB_BlinkN(2, 200, 200, 0, BRIGHT_FULL, 0);
                 SecCore_MemZero(g_SessionSK, SK_SIZE);
-                g_FerryState = STATE_ASSIGNED;  /* 工控: 绿灯 */
+                g_FerryState = STATE_PULLING;   /* 青灯 — 数据已加密落盘 */
                 hs_done = 1;
             }
         }

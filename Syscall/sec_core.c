@@ -37,6 +37,14 @@ uint8_t      g_SessionSK[SK_SIZE] = {0};
 uint8_t      g_ChallengeFailCount = 0;
 
 /*═════════════════════════════════════════════════════════════
+ * RAM 扇区缓冲区 (SD 卡到位后替换为 sd_raw_read/write_sector)
+ *═════════════════════════════════════════════════════════════*/
+uint8_t  g_SectorTask[SECTOR_SIZE]                          = {0};
+uint8_t  g_SectorData[SECTOR_SIZE * SECTOR_DATA_MAX]        = {0};
+uint32_t g_DataWriteLen                                     = 0;
+uint8_t  g_ReadOutBuf[SECTOR_SIZE]                          = {0};
+
+/*═════════════════════════════════════════════════════════════
  * SHA-256 原语 (FIPS 180-4) — 使用 uint64_t 计数器
  *═════════════════════════════════════════════════════════════*/
 
@@ -289,7 +297,7 @@ void SecCore_HMAC_SHA256(const uint8_t *key, uint32_t key_len,
 
 void SecCore_Init(void)
 {
-    g_FerryState         = STATE_IDLE;
+    g_FerryState         = STATE_INIT;  /* 绿灯 — 就绪 */
     g_ChallengeFailCount = 0;
     SecCore_MemZero(g_NonceDev, sizeof(g_NonceDev));
     SecCore_MemZero(g_SessionSK, sizeof(g_SessionSK));
@@ -447,7 +455,7 @@ uint8_t SecCore_VerifyHandshake(const uint8_t *challenge_buf,
     uint8_t combined[32];
     int i;
 
-    if (g_FerryState != STATE_LOCK) return 0xFF;
+    if (g_FerryState == STATE_CORE_PANIC) return 0xFF;
     if (challenge_buf == NULL || challenge_len < 48) goto fail;
 
     memcpy(nonce_h,       challenge_buf,      16);
@@ -471,7 +479,6 @@ uint8_t SecCore_VerifyHandshake(const uint8_t *challenge_buf,
     SecCore_MemZero(nonce_h, sizeof(nonce_h));
     SecCore_MemZero(hmac_received, sizeof(hmac_received));
 
-    g_FerryState         = STATE_READ_ALLOW;
     g_ChallengeFailCount = 0;
     return 0;
 
@@ -510,4 +517,66 @@ void SecCore_MemZero(volatile void *buf, uint32_t len)
     while (len--) {
         *p++ = 0;
     }
+}
+
+/*═════════════════════════════════════════════════════════════
+ * 状态机铁闸 — 命令级访问控制
+ *═════════════════════════════════════════════════════════════*/
+
+/**
+ * @brief  检查当前状态是否允许执行指定 SVC 命令
+ * @return 0=允许, 1=拒绝(状态不符), 2=PANIC绝拒绝一切
+ */
+uint8_t SecCore_AuditSVC(uint8_t svc_id)
+{
+    /* PANIC 态拒绝一切 */
+    if (g_FerryState == STATE_CORE_PANIC) return 2;
+
+    switch (svc_id) {
+        /* 实用 SVC — 始终允许 */
+        case 0x01: /* GPIO_Set   */
+        case 0x02: /* GPIO_Reset */
+        case 0x03: /* DelayMs    */
+            return 0;
+
+        /* WriteTask (0x10) — 仅 STATE_INIT 或 STATE_IDLE */
+        case 0x10:
+            if (g_FerryState == STATE_INIT || g_FerryState == STATE_IDLE)
+                return 0;
+            break;
+
+        /* ReadTask (0x11) / WriteData (0x12) — STATE_ASSIGNED或累积态 */
+        case 0x11:
+        case 0x12:
+            if (g_FerryState == STATE_ASSIGNED ||
+                g_FerryState == STATE_PULLING ||
+                g_FerryState == STATE_READ_ALLOW)
+                return 0;
+            break;
+
+        /* ReadShake (0x19) — 非 PANIC 均可 (握手挑战) */
+        case 0x19:
+            return 0;
+
+        /* ReadData (0x1A) — 仅 STATE_READ_ALLOW */
+        case 0x1A:
+            if (g_FerryState == STATE_READ_ALLOW)
+                return 0;
+            break;
+
+        default:
+            break;
+    }
+    return 1; /* 状态不符合 */
+}
+
+/**
+ * @brief  构建审计 NACK 帧载荷
+ *         格式: [当前状态(1B)] [被拒绝的SVC号(1B)]
+ */
+uint8_t SecCore_BuildAuditNACK(uint8_t *out)
+{
+    out[0] = (uint8_t)g_FerryState;
+    out[1] = 0xFF; /* 调用者回填 svc_id */
+    return 2;
 }

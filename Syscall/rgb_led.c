@@ -7,6 +7,7 @@
  *          默认共阴驱动. 若模块为共阳, 取消下行注释:
  */
 //#define RGB_COMMON_ANODE
+#define RGB_COMMON_ANODE
 
 #include "rgb_led.h"
 
@@ -64,14 +65,14 @@ static uint16_t scale_ccr(uint8_t v)
 static void write_rgb(uint8_t r, uint8_t g, uint8_t b)
 {
 #ifdef RGB_COMMON_ANODE
-    /* 共阳: CCR=满占空比 = 灯灭, 0 = 灯最亮 */
     r = BRIGHT_FULL - r;
     g = BRIGHT_FULL - g;
     b = BRIGHT_FULL - b;
 #endif
-    TIM2->CCR1 = scale_ccr(r);
-    TIM2->CCR2 = scale_ccr(g);
-    TIM2->CCR3 = scale_ccr(b);
+    /* 接线: PA0=G, PA1=B, PA2=R */
+    TIM2->CCR1 = scale_ccr(g);
+    TIM2->CCR2 = scale_ccr(b);
+    TIM2->CCR3 = scale_ccr(r);
 }
 
 /*─────────────────────────────────────────────────────────
@@ -153,23 +154,28 @@ void RGB_Update(void)
     switch (g_FerryState) {
 
     case STATE_INIT:
-        /* 蓝灯常亮 */
-        write_rgb(0, 0, BRIGHT_FULL);
+        /* 绿灯常亮 — 就绪, 等待连接 */
+        write_rgb(0, BRIGHT_FULL, 0);
         return;
 
     case STATE_IDLE:
-        /* 蓝灯慢闪 */
+        /* 绿灯慢闪 — 空闲等待任务 */
         cycle = SLOW_BLINK_ON + SLOW_BLINK_OFF;
         phase = g_tick % cycle;
         g_on_off = (phase < SLOW_BLINK_ON) ? 1 : 0;
         if (g_on_off)
-            write_rgb(0, 0, BRIGHT_FULL);
+            write_rgb(0, BRIGHT_FULL, 0);
         else
             write_rgb(0, 0, 0);
         return;
 
     case STATE_ASSIGNED:
-        /* 绿灯慢闪 */
+        /* 蓝灯常亮 — 任务已存储 (WriteTask 完成) */
+        write_rgb(0, 0, BRIGHT_FULL);
+        return;
+
+    case STATE_PULLING:
+        /* 绿灯慢闪 — 数据已加密落盘 (WriteData 完成) */
         cycle = SLOW_BLINK_ON + SLOW_BLINK_OFF;
         phase = g_tick % cycle;
         g_on_off = (phase < SLOW_BLINK_ON) ? 1 : 0;
@@ -179,41 +185,14 @@ void RGB_Update(void)
             write_rgb(0, 0, 0);
         return;
 
-    case STATE_PULLING:
-        /* 蓝绿交替爆闪 */
-        cycle = ALT_BLINK_ON + ALT_BLINK_OFF;
-        phase = g_tick % cycle;
-        g_on_off = (phase < ALT_BLINK_ON) ? 1 : 0;
-        /* 每半个交替周期翻转一次选色 */
-        if ((g_tick / cycle) % 2 == 0) {
-            /* 蓝 */
-            if (g_on_off)
-                write_rgb(0, 0, BRIGHT_FULL);
-            else
-                write_rgb(0, 0, 0);
-        } else {
-            /* 绿 */
-            if (g_on_off)
-                write_rgb(0, BRIGHT_FULL, 0);
-            else
-                write_rgb(0, 0, 0);
-        }
-        return;
-
     case STATE_LOCK:
-        /* 黄灯常亮 (R+G) */
-        write_rgb(BRIGHT_FULL, BRIGHT_FULL, 0);
+        /* 青灯常亮 (G+B) — 握手等待中 */
+        write_rgb(0, BRIGHT_FULL, BRIGHT_FULL);
         return;
 
     case STATE_READ_ALLOW:
-        /* 绿灯爆闪 */
-        cycle = FAST_BLINK_ON + FAST_BLINK_OFF;
-        phase = g_tick % cycle;
-        g_on_off = (phase < FAST_BLINK_ON) ? 1 : 0;
-        if (g_on_off)
-            write_rgb(0, BRIGHT_FULL, 0);
-        else
-            write_rgb(0, 0, 0);
+        /* 白灯常亮 (R+G+B) — 数据已取出 (ReadData 完成) */
+        write_rgb(BRIGHT_FULL, BRIGHT_FULL, BRIGHT_FULL);
         return;
 
     case STATE_CORE_PANIC:

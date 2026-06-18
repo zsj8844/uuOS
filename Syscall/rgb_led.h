@@ -48,13 +48,12 @@ void RGB_SetRaw(uint8_t r, uint8_t g, uint8_t b);
  * @note   需在主循环中周期性调用 (建议每 20~50ms 一次)
  *
  *         状态 ↔ 灯效映射:
- *           STATE_INIT       → 蓝灯常亮
- *           STATE_IDLE       → 蓝灯慢闪 (800ms 周期)
- *           STATE_ASSIGNED   → 绿灯慢闪 (800ms 周期)
- *           STATE_PULLING    → 蓝绿交替爆闪 (200ms 周期)
- *           STATE_LOCK       → 黄灯常亮 (红+绿)
- *           STATE_READ_ALLOW → 绿灯爆闪 (150ms 周期)
- *           STATE_CORE_PANIC → 红灯爆闪 (100ms 周期)
+ *           STATE_INIT       → 绿灯常亮 (就绪)
+ *           STATE_ASSIGNED   → 蓝灯常亮 (任务已存储)
+ *           STATE_PULLING    → 绿灯慢闪 (数据已加密落盘)
+ *           STATE_LOCK       → 青灯常亮 (握手等待)
+ *           STATE_READ_ALLOW → 白灯常亮 (数据已取出)
+ *           STATE_CORE_PANIC → 红灯爆闪 (死锁)
  */
 void RGB_Update(void);
 

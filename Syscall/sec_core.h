@@ -39,6 +39,17 @@ typedef enum {
 /* 挑战失败上限 */
 #define MAX_CHALLENGE_FAILS  3
 
+/* RAM 扇区缓冲区 (SD 卡到之前用内存模拟) */
+#define SECTOR_SIZE      512
+#define SECTOR_TASK      1024   /* 任务暗号舱扇区号 */
+#define SECTOR_DATA_BASE 1025   /* 密文数据起始扇区 */
+#define SECTOR_DATA_MAX  16     /* 最多 16 扇区 = 8KB */
+
+extern uint8_t g_SectorTask[SECTOR_SIZE];             /* 任务暗号舱 */
+extern uint8_t g_SectorData[SECTOR_SIZE * SECTOR_DATA_MAX]; /* 密文数据舱 */
+extern uint32_t g_DataWriteLen;                       /* 已落盘密文长度 */
+extern uint8_t g_ReadOutBuf[SECTOR_SIZE];             /* 读操作输出缓冲 */
+
 /*═════════════════════════════════════════════════════════════
  * 全局状态
  *═════════════════════════════════════════════════════════════*/
@@ -134,6 +145,28 @@ void SecCore_DeriveSK(const uint8_t *mk, const uint8_t *nonce_dev,
  * @return 1 = 允许, 0 = 拒绝
  */
 uint8_t SecCore_IsReadAllowed(void);
+
+/**
+ * @brief  状态机铁闸 — 检查当前状态是否允许执行指定 SVC 命令
+ * @param  svc_id: SVC 调用号 (0x01~0x1A)
+ * @return 0 = 允许, 非0 = 拒绝
+ *
+ *  允许矩阵:
+ *    GPIO/延时 (0x01/02/03) → 始终允许
+ *    WriteTask (0x10)      → STATE_INIT / STATE_IDLE  (密网任务注入)
+ *    ReadTask  (0x11)      → STATE_ASSIGNED            (工控读取任务)
+ *    WriteData (0x12)      → STATE_ASSIGNED            (工控推送明文)
+ *    ReadShake (0x19)      → 非 PANIC 态均可           (密网挑战握手)
+ *    ReadData  (0x1A)      → STATE_READ_ALLOW          (解密数据泵出)
+ */
+uint8_t SecCore_AuditSVC(uint8_t svc_id);
+
+/**
+ * @brief  格式化审计拒绝响应用于串口回传
+ * @param  out: 输出缓冲 (至少 2 字节)
+ * @return 填充长度 (2)
+ */
+uint8_t SecCore_BuildAuditNACK(uint8_t *out);
 
 /**
  * @brief  触发 PANIC: 清空 SK, 状态锁死, LED 红灯爆闪
