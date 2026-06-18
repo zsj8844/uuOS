@@ -1,8 +1,8 @@
 # SecuFerry-OS 密网任务下发工具 Makefile
 #
-# 支持 MinGW-w64 和 MSVC (cl.exe)
+# Transport: CH340 Serial (COM port)
 #
-# MinGW:
+# MinGW-w64:
 #   make
 #
 # MSVC (Developer Command Prompt):
@@ -12,19 +12,19 @@
 #   make clean
 
 TARGET    = MasterTask.exe
-SOURCES   = main.c hid_comm.c crypto_win.c protocol.c
+SOURCES   = main.c serial_comm.c crypto_win.c protocol.c
 OBJS      = $(SOURCES:.c=.o)
 
 # ── MinGW-w64 ──────────────────────────────────────────
 CC        = gcc
-CFLAGS    = -Wall -Wextra -O2 -municode
-LDFLAGS   = -lhid -lsetupapi -lbcrypt
+CFLAGS    = -Wall -Wextra -O2
+LDFLAGS   = -lbcrypt
 
 # ── MSVC override ──────────────────────────────────────
 ifeq ($(TOOLCHAIN),msvc)
   CC      = cl
   CFLAGS  = /nologo /W3 /O2 /Fe$(TARGET)
-  LDFLAGS = /link hid.lib setupapi.lib bcrypt.lib
+  LDFLAGS = /link bcrypt.lib
   OBJS    = $(SOURCES)
 endif
 
@@ -40,7 +40,7 @@ else
 endif
 
 ifeq ($(TOOLCHAIN),msvc)
-# MSVC: 无 .o 中间文件, 直接编译链接
+# MSVC: no intermediate .o
 %.obj: %.c
 	$(CC) /c $(CFLAGS) $<
 else

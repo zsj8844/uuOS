@@ -28,7 +28,8 @@
 ".\objects\main.o"
 ".\objects\stm32f10x_it.o"
 ".\objects\sec_core.o"
-".\objects\usb_hid.o"
+".\objects\ch340_comm.o"
+".\objects\rgb_led.o"
 --strict --scatter ".\Objects\1_test.sct"
 --summary_stderr --info summarysizes --map --load_addr_map_info --xref --callgraph --symbols
 --info sizes --info totals --info unused --info veneers

@@ -37,7 +37,7 @@ uint8_t      g_SessionSK[SK_SIZE] = {0};
 uint8_t      g_ChallengeFailCount = 0;
 
 /*═════════════════════════════════════════════════════════════
- * SHA-256 原语 (FIPS 180-4)
+ * SHA-256 原语 (FIPS 180-4) — 使用 uint64_t 计数器
  *═════════════════════════════════════════════════════════════*/
 
 #define ROTR32(x, n)  (((x) >> (n)) | ((x) << (32 - (n))))
@@ -50,136 +50,158 @@ uint8_t      g_ChallengeFailCount = 0;
 #define SSIG1(x)      (ROTR32(x, 17) ^ ROTR32(x, 19) ^ SHR32(x, 10))
 
 static const uint32_t K256[64] = {
-    0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
-    0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
-    0xD807AA98, 0x12835B01, 0x243185BE, 0x550C7DC3,
-    0x72BE5D74, 0x80DEB1FE, 0x9BDC06A7, 0xC19BF174,
-    0xE49B69C1, 0xEFBE4786, 0x0FC19DC6, 0x240CA1CC,
-    0x2DE92C6F, 0x4A7484AA, 0x5CB0A9DC, 0x76F988DA,
-    0x983E5152, 0xA831C66D, 0xB00327C8, 0xBF597FC7,
-    0xC6E00BF3, 0xD5A79147, 0x06CA6351, 0x14292967,
-    0x27B70A85, 0x2E1B2138, 0x4D2C6DFC, 0x53380D13,
-    0x650A7354, 0x766A0ABB, 0x81C2C92E, 0x92722C85,
-    0xA2BFE8A1, 0xA81A664B, 0xC24B8B70, 0xC76C51A3,
-    0xD192E819, 0xD6990624, 0xF40E3585, 0x106AA070,
-    0x19A4C116, 0x1E376C08, 0x2748774C, 0x34B0BCB5,
-    0x391C0CB3, 0x4ED8AA4A, 0x5B9CCA4F, 0x682E6FF3,
-    0x748F82EE, 0x78A5636F, 0x84C87814, 0x8CC70208,
-    0x90BEFFFA, 0xA4506CEB, 0xBEF9A3F7, 0xC67178F2,
+    0x428A2F98,0x71374491,0xB5C0FBCF,0xE9B5DBA5,
+    0x3956C25B,0x59F111F1,0x923F82A4,0xAB1C5ED5,
+    0xD807AA98,0x12835B01,0x243185BE,0x550C7DC3,
+    0x72BE5D74,0x80DEB1FE,0x9BDC06A7,0xC19BF174,
+    0xE49B69C1,0xEFBE4786,0x0FC19DC6,0x240CA1CC,
+    0x2DE92C6F,0x4A7484AA,0x5CB0A9DC,0x76F988DA,
+    0x983E5152,0xA831C66D,0xB00327C8,0xBF597FC7,
+    0xC6E00BF3,0xD5A79147,0x06CA6351,0x14292967,
+    0x27B70A85,0x2E1B2138,0x4D2C6DFC,0x53380D13,
+    0x650A7354,0x766A0ABB,0x81C2C92E,0x92722C85,
+    0xA2BFE8A1,0xA81A664B,0xC24B8B70,0xC76C51A3,
+    0xD192E819,0xD6990624,0xF40E3585,0x106AA070,
+    0x19A4C116,0x1E376C08,0x2748774C,0x34B0BCB5,
+    0x391C0CB3,0x4ED8AA4A,0x5B9CCA4F,0x682E6FF3,
+    0x748F82EE,0x78A5636F,0x84C87814,0x8CC70208,
+    0x90BEFFFA,0xA4506CEB,0xBEF9A3F7,0xC67178F2,
 };
 
 typedef struct {
-    uint32_t  H[8];
-    uint32_t  total_bits_hi;
-    uint32_t  total_bits_lo;
-    uint8_t   buf[64];
-    uint8_t   buf_len;
-    uint8_t   finalized;
+    uint32_t H[8];
+    uint64_t total;       /* 总比特数 (换成 uint64_t 避免 hi/lo 操作) */
+    uint8_t  buf[64];
+    uint8_t  buf_len;
 } SHA256_CTX;
 
-static void sha256_transform(SHA256_CTX *ctx, const uint8_t *block)
+static void sha256_transform(uint32_t H[8], const uint8_t block[64])
 {
-    uint32_t W[64];
-    uint32_t a, b, c, d, e, f, g, h, T1, T2;
+    uint32_t W[64], a,b,c,d,e,f,g,h,T1,T2;
     int t;
 
-    /* 前 16 个字直接来自 block (大端) */
     for (t = 0; t < 16; t++) {
-        W[t] = ((uint32_t)block[t*4]   << 24) |
-               ((uint32_t)block[t*4+1] << 16) |
-               ((uint32_t)block[t*4+2] <<  8) |
-               ((uint32_t)block[t*4+3]);
+        W[t] = ((uint32_t)block[t*4]<<24) | ((uint32_t)block[t*4+1]<<16) |
+               ((uint32_t)block[t*4+2]<<8)  |  (uint32_t)block[t*4+3];
     }
-    /* 扩展 48 个字 */
     for (t = 16; t < 64; t++) {
         W[t] = SSIG1(W[t-2]) + W[t-7] + SSIG0(W[t-15]) + W[t-16];
     }
 
-    a = ctx->H[0]; b = ctx->H[1]; c = ctx->H[2]; d = ctx->H[3];
-    e = ctx->H[4]; f = ctx->H[5]; g = ctx->H[6]; h = ctx->H[7];
+    a=H[0]; b=H[1]; c=H[2]; d=H[3]; e=H[4]; f=H[5]; g=H[6]; h=H[7];
 
     for (t = 0; t < 64; t++) {
         T1 = h + BSIG1(e) + CH(e,f,g) + K256[t] + W[t];
         T2 = BSIG0(a) + MAJ(a,b,c);
-        h = g;  g = f;  f = e;  e = d + T1;
-        d = c;  c = b;  b = a;  a = T1 + T2;
+        h=g; g=f; f=e; e=d+T1; d=c; c=b; b=a; a=T1+T2;
     }
 
-    ctx->H[0] += a;  ctx->H[1] += b;  ctx->H[2] += c;  ctx->H[3] += d;
-    ctx->H[4] += e;  ctx->H[5] += f;  ctx->H[6] += g;  ctx->H[7] += h;
+    H[0]+=a; H[1]+=b; H[2]+=c; H[3]+=d; H[4]+=e; H[5]+=f; H[6]+=g; H[7]+=h;
 }
 
 static void sha256_init(SHA256_CTX *ctx)
 {
-    ctx->H[0] = 0x6A09E667;  ctx->H[1] = 0xBB67AE85;
-    ctx->H[2] = 0x3C6EF372;  ctx->H[3] = 0xA54FF53A;
-    ctx->H[4] = 0x510E527F;  ctx->H[5] = 0x9B05688C;
-    ctx->H[6] = 0x1F83D9AB;  ctx->H[7] = 0x5BE0CD19;
-    ctx->total_bits_hi = 0;
-    ctx->total_bits_lo = 0;
-    ctx->buf_len = 0;
-    ctx->finalized = 0;
+    ctx->H[0]=0x6A09E667; ctx->H[1]=0xBB67AE85; ctx->H[2]=0x3C6EF372; ctx->H[3]=0xA54FF53A;
+    ctx->H[4]=0x510E527F; ctx->H[5]=0x9B05688C; ctx->H[6]=0x1F83D9AB; ctx->H[7]=0x5BE0CD19;
+    ctx->total=0; ctx->buf_len=0;
 }
 
 static void sha256_update(SHA256_CTX *ctx, const uint8_t *data, uint32_t len)
 {
     uint32_t i;
-    uint64_t bits = (uint64_t)len * 8;
-
-    ctx->total_bits_lo += (uint32_t)bits;
-    if (ctx->total_bits_lo < (uint32_t)bits) {
-        ctx->total_bits_hi++;
-    }
-    ctx->total_bits_hi += (uint32_t)(bits >> 32);
-
+    ctx->total += (uint64_t)len * 8;
     for (i = 0; i < len; i++) {
         ctx->buf[ctx->buf_len++] = data[i];
         if (ctx->buf_len == 64) {
-            sha256_transform(ctx, ctx->buf);
+            sha256_transform(ctx->H, ctx->buf);
             ctx->buf_len = 0;
         }
     }
 }
 
-static void sha256_final(SHA256_CTX *ctx, uint8_t *out)
+static void sha256_final(SHA256_CTX *ctx, uint8_t out[32])
 {
-    uint8_t pad[64];
-    uint32_t pad_len, i;
-    uint64_t total_bits;
+    uint64_t msg_bits = ctx->total;   /* save BEFORE padding */
+    uint8_t  pad;
+    uint32_t i;
 
-    if (!ctx->finalized) {
-        ctx->finalized = 1;
+    /* Append 0x80 */
+    pad = 0x80;
+    sha256_update(ctx, &pad, 1);
 
-        /* 补位: 0x80 + 0x00 + 64-bit 长度 (大端) */
-        pad[0] = 0x80;
-        for (i = 1; i < 64; i++) pad[i] = 0x00;
-
-        if (ctx->buf_len < 56) {
-            pad_len = 56 - ctx->buf_len;
-        } else {
-            pad_len = 64 + 56 - ctx->buf_len;
-        }
-        sha256_update(ctx, pad, pad_len);
-
-        /* 写入 64-bit 长度 (大端) */
-        total_bits = ((uint64_t)ctx->total_bits_hi << 32) | ctx->total_bits_lo;
-        pad[0] = (uint8_t)(total_bits >> 56);
-        pad[1] = (uint8_t)(total_bits >> 48);
-        pad[2] = (uint8_t)(total_bits >> 40);
-        pad[3] = (uint8_t)(total_bits >> 32);
-        pad[4] = (uint8_t)(total_bits >> 24);
-        pad[5] = (uint8_t)(total_bits >> 16);
-        pad[6] = (uint8_t)(total_bits >>  8);
-        pad[7] = (uint8_t)(total_bits);
-        sha256_update(ctx, pad, 8);
+    /* Pad with zeros until (total_bytes % 64) == 56 */
+    while (ctx->buf_len != 56) {
+        pad = 0x00;
+        sha256_update(ctx, &pad, 1);
     }
 
-    /* 输出 32 字节 (大端) */
+    /* Append 64-bit message length in big-endian */
+    for (i = 0; i < 8; i++) {
+        pad = (uint8_t)(msg_bits >> (56 - i*8));
+        sha256_update(ctx, &pad, 1);
+    }
+    /* buf_len should now be 0 (just processed last block) */
+
+    /* Output in big-endian */
     for (i = 0; i < 8; i++) {
         out[i*4]   = (uint8_t)(ctx->H[i] >> 24);
         out[i*4+1] = (uint8_t)(ctx->H[i] >> 16);
         out[i*4+2] = (uint8_t)(ctx->H[i] >>  8);
         out[i*4+3] = (uint8_t)(ctx->H[i]);
+    }
+}
+
+/* 便捷函数: 一次性 SHA-256 + 自测 */
+void sha256_direct(const uint8_t *data, uint32_t len, uint8_t out[32])
+{
+    SHA256_CTX ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, data, len);
+    sha256_final(&ctx, out);
+
+    /* 如果输入是 "abc" → 板载 LED 自测 */
+    if (len == 3 && data[0]=='a' && data[1]=='b' && data[2]=='c') {
+        const uint8_t exp[32] = {
+            0xba,0x78,0x16,0xbf,0x8f,0x01,0xcf,0xea,
+            0x41,0x41,0x40,0xde,0x5d,0xae,0x22,0x23,
+            0xb0,0x03,0x61,0xa3,0x96,0x17,0x7a,0x9c,
+            0xb4,0x10,0xff,0x61,0xf2,0x00,0x15,0xad
+        };
+        volatile uint8_t diff = 0;
+        int i;
+        for (i = 0; i < 32; i++) diff |= out[i] ^ exp[i];
+
+        /* 初始化 PC13 (防止 GPIO 未配) */
+        RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOC, ENABLE);
+        {
+            GPIO_InitTypeDef g;
+            g.GPIO_Pin   = GPIO_Pin_13;
+            g.GPIO_Mode  = GPIO_Mode_Out_PP;
+            g.GPIO_Speed = GPIO_Speed_2MHz;
+            GPIO_Init(GPIOC, &g);
+            GPIOC->BSRR = GPIO_Pin_13;  /* 灭 */
+        }
+
+        if (diff == 0) {
+            /* SHA256 通过 → 闪 3 下 */
+            for (int b = 0; b < 3; b++) {
+                GPIOC->BRR = GPIO_Pin_13;
+                for(volatile uint32_t x=0;x<1440000;x++)__NOP();
+                GPIOC->BSRR = GPIO_Pin_13;
+                for(volatile uint32_t x=0;x<720000;x++)__NOP();
+            }
+        } else {
+            /* SHA256 失败 → 闪第 1 字节高 4 位次数 */
+            uint8_t nibble = out[0] >> 4;
+            if (nibble == 0) nibble = 1;
+            for (int b = 0; b < (int)nibble; b++) {
+                GPIOC->BRR = GPIO_Pin_13;
+                for(volatile uint32_t x=0;x<360000;x++)__NOP();
+                GPIOC->BSRR = GPIO_Pin_13;
+                for(volatile uint32_t x=0;x<180000;x++)__NOP();
+            }
+            for(volatile uint32_t x=0;x<7200000;x++)__NOP(); /* 等 1 秒 */
+        }
     }
 }
 
@@ -199,6 +221,12 @@ void SecCore_HMAC_SHA256(const uint8_t *key, uint32_t key_len,
     SHA256_CTX ctx;
     uint8_t  inner_hash[32];
     int i;
+
+    /* HMAC 自测: key=0x0b*20, data="Hi There" → RFC 4231 TC1 */
+    if (key_len == 20 && data_len == 8 && key[0] == 0x0b && key[1] == 0x0b
+        && data[0] == 'H' && data[1] == 'i') {
+        /* 正常计算, 但验证结果 */
+    }
 
     /* 若 key 长于 64 字节, 先 hash 一次 */
     if (key_len > 64) {
@@ -231,6 +259,28 @@ void SecCore_HMAC_SHA256(const uint8_t *key, uint32_t key_len,
     sha256_update(&ctx, k_opad, 64);
     sha256_update(&ctx, inner_hash, 32);
     sha256_final(&ctx, out);
+
+    /* HMAC 自测验证 */
+    if (key_len == 20 && data_len == 8 && key[0] == 0x0b
+        && data[0] == 'H' && data[1] == 'i') {
+        const uint8_t exp[32] = {
+            0xb0,0x34,0x4c,0x61,0xd8,0xdb,0x38,0x53,
+            0x5c,0xa8,0xaf,0xce,0xaf,0x0b,0xf1,0x2b,
+            0x88,0x1d,0xc2,0x00,0xc9,0x83,0x3d,0xa7,
+            0x26,0xe9,0x37,0x6c,0x2e,0x32,0xcf,0xf7
+        };
+        volatile uint8_t diff = 0;
+        for (int i = 0; i < 32; i++) diff |= out[i] ^ exp[i];
+        if (diff == 0) {
+            /* HMAC 通过: 在 SHA256 测试后额外闪 3 下快闪 */
+            for (int b = 0; b < 3; b++) {
+                GPIOC->BRR = GPIO_Pin_13;
+                for(volatile uint32_t x=0;x<360000;x++)__NOP();
+                GPIOC->BSRR = GPIO_Pin_13;
+                for(volatile uint32_t x=0;x<360000;x++)__NOP();
+            }
+        }
+    }
 }
 
 /*═════════════════════════════════════════════════════════════
@@ -280,26 +330,67 @@ const uint8_t* SecCore_GetMK_DATA(void)
 
 /**
  * @brief  生成 16 字节随机 nonce
- *         原型阶段: 混合 SysTick 计数器 + ADC (内部温度传感器) 噪声 LSB
- *         量产阶段: 替换为硬件 TRNG 或 RNG 外设
+ *
+ *          熵源:
+ *            1. SysTick 计数器低 8 位 (持续递减, 不可预测)
+ *            2. CPU 指令时序抖动 (编译器不可优化)
+ *            3. ADC 内部温度传感器噪声 LSB
+ *
+ *          STM32F103 无硬件 TRNG, 但三源混合后经 LCG 扩展,
+ *          每次上电 nonce 不同, 满足原型阶段安全需求。
  */
+static int g_adc_noise_inited = 0;
+
 void SecCore_GenNonce(uint8_t *nonce_out)
 {
     volatile uint32_t mix = 0;
     int i;
 
-    /* 熵源 1: SysTick 当前计数值 (持续递减, 低 8 位不可预测) */
+    /* ── 熵源 1: SysTick ── */
     mix ^= SysTick->VAL;
 
-    /* 熵源 2: 循环空转, 利用指令时序抖动 (编译器不可优化) */
+    /* ── 熵源 2: 指令时序抖动 ── */
     for (i = 0; i < 128; i++) {
         mix ^= (SysTick->VAL << (i & 0x0F));
         __NOP();
     }
 
-    /* 展开为 16 字节 nonce (原型: 确定性扩展, 量产: 真随机源) */
+    /* ── 熵源 3: ADC 内部温度传感器噪声 (首次调用时初始化) ── */
+    if (!g_adc_noise_inited) {
+        g_adc_noise_inited = 1;
+
+        /* 使能 ADC1 + 内部温度传感器 */
+        RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
+        ADC_TempSensorVrefintCmd(ENABLE);
+
+        /* ADC1 基础配置 */
+        ADC_InitTypeDef adc;
+        ADC_StructInit(&adc);
+        adc.ADC_Mode = ADC_Mode_Independent;
+        adc.ADC_ScanConvMode = DISABLE;
+        adc.ADC_ContinuousConvMode = DISABLE;
+        adc.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
+        adc.ADC_DataAlign = ADC_DataAlign_Right;
+        adc.ADC_NbrOfChannel = 1;
+        ADC_Init(ADC1, &adc);
+
+        /* 校准 ADC */
+        ADC_Cmd(ADC1, ENABLE);
+        ADC_ResetCalibration(ADC1);
+        while (ADC_GetResetCalibrationStatus(ADC1));
+        ADC_StartCalibration(ADC1);
+        while (ADC_GetCalibrationStatus(ADC1));
+    }
+
+    /* 采样温度传感器通道 (ADC1_CH16), 取 LSB 噪声混合 */
+    ADC_RegularChannelConfig(ADC1, ADC_Channel_16, 1, ADC_SampleTime_239Cycles5);
+    ADC_SoftwareStartConvCmd(ADC1, ENABLE);
+    while (!ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC));
+    mix ^= ADC_GetConversionValue(ADC1) & 0x0FFF;
+
+    /* ── LCG 扩展为 16 字节 nonce ── */
     for (i = 0; i < 16; i++) {
-        mix = (mix * 1103515245U + 12345U);  /* LCG 扰动 */
+        mix = (mix * 1103515245U + 12345U);
         nonce_out[i] = (uint8_t)((mix >> 16) ^ (mix & 0xFF));
     }
 }
@@ -339,54 +430,44 @@ void SecCore_DeriveSK(const uint8_t *mk, const uint8_t *nonce_dev,
  *         验证通过 → STATE_READ_ALLOW + 派生 g_SessionSK
  *         验证失败 → g_ChallengeFailCount++, ≥3 → PANIC
  */
-uint8_t SecCore_VerifyChallenge(const uint8_t *challenge_buf, uint32_t challenge_len)
+/**
+ * @brief  通用 HMAC 挑战-应答验证 (可指定密钥)
+ *
+ *         challenge_buf: nonce_h(16) || HMAC(32) = 48 bytes
+ *         验证通过 → STATE_READ_ALLOW + 派生 g_SessionSK
+ *         验证失败 → g_ChallengeFailCount++, ≥3 → STATE_CORE_PANIC
+ */
+uint8_t SecCore_VerifyHandshake(const uint8_t *challenge_buf,
+                                uint32_t challenge_len,
+                                const uint8_t *mk, uint32_t mk_len)
 {
     uint8_t hmac_expected[HMAC_OUT_SIZE];
     uint8_t hmac_received[HMAC_OUT_SIZE];
     uint8_t nonce_h[16];
-    uint8_t combined[32];         /* nonce_s(16) || nonce_h(16) */
+    uint8_t combined[32];
     int i;
 
-    /* 只允许 STATE_LOCK 状态下进行挑战 */
-    if (g_FerryState != STATE_LOCK) {
-        return 0xFF;
-    }
+    if (g_FerryState != STATE_LOCK) return 0xFF;
+    if (challenge_buf == NULL || challenge_len < 48) goto fail;
 
-    /* 挑战数据长度: 必须 >= 48 (nonce_h 16 + HMAC tag 32) */
-    if (challenge_buf == NULL || challenge_len < 48) {
-        goto fail;
-    }
-
-    /* 提取 nonce_h 和 HMAC tag */
     memcpy(nonce_h,       challenge_buf,      16);
     memcpy(hmac_received, challenge_buf + 16, 32);
 
-    /* 拼接 nonce_s || nonce_h, 计算 expected HMAC */
     SecCore_MemZero(combined, sizeof(combined));
     memcpy(combined,       g_NonceDev, 16);
     memcpy(combined + 16,  nonce_h,    16);
 
-    SecCore_HMAC_SHA256(MK_CTRL, MK_CTRL_SIZE,
-                        combined, 32, hmac_expected);
+    SecCore_HMAC_SHA256(mk, mk_len, combined, 32, hmac_expected);
 
-    /* 恒定时间比对 32 字节 HMAC tag */
     {
         volatile uint8_t diff = 0;
-        for (i = 0; i < 32; i++) {
-            diff |= (hmac_expected[i] ^ hmac_received[i]);
-        }
+        for (i = 0; i < 32; i++) diff |= (hmac_expected[i] ^ hmac_received[i]);
         SecCore_MemZero(hmac_expected, sizeof(hmac_expected));
         SecCore_MemZero(combined, sizeof(combined));
-
-        if (diff != 0) {
-            goto fail;
-        }
+        if (diff != 0) goto fail;
     }
 
-    /* ══════ 验证通过 ══════ */
-    /* SK = HMAC-SHA256(MK_CTRL, nonce_s || nonce_h)[:16] */
-    SecCore_DeriveSK(MK_CTRL, g_NonceDev, nonce_h, g_SessionSK);
-
+    SecCore_DeriveSK(mk, g_NonceDev, nonce_h, g_SessionSK);
     SecCore_MemZero(nonce_h, sizeof(nonce_h));
     SecCore_MemZero(hmac_received, sizeof(hmac_received));
 
@@ -396,10 +477,14 @@ uint8_t SecCore_VerifyChallenge(const uint8_t *challenge_buf, uint32_t challenge
 
 fail:
     g_ChallengeFailCount++;
-    if (g_ChallengeFailCount >= MAX_CHALLENGE_FAILS) {
-        SecCore_Panic();
-    }
+    if (g_ChallengeFailCount >= MAX_CHALLENGE_FAILS) SecCore_Panic();
     return 0xFF;
+}
+
+uint8_t SecCore_VerifyChallenge(const uint8_t *challenge_buf, uint32_t challenge_len)
+{
+    return SecCore_VerifyHandshake(challenge_buf, challenge_len,
+                                   MK_CTRL, MK_CTRL_SIZE);
 }
 
 uint8_t SecCore_IsReadAllowed(void)

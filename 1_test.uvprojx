@@ -688,9 +688,24 @@
               <FilePath>.\Syscall\sec_core.h</FilePath>
             </File>
             <File>
-              <FileName>usb_hid.c</FileName>
+              <FileName>ch340_comm.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\Syscall\usb_hid.c</FilePath>
+              <FilePath>.\Syscall\ch340_comm.c</FilePath>
+            </File>
+            <File>
+              <FileName>ch340_comm.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Syscall\ch340_comm.h</FilePath>
+            </File>
+            <File>
+              <FileName>rgb_led.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Syscall\rgb_led.c</FilePath>
+            </File>
+            <File>
+              <FileName>rgb_led.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Syscall\rgb_led.h</FilePath>
             </File>
           </Files>
         </Group>

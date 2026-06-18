@@ -30,5 +30,6 @@
 .\objects\main.o: .\Libary\misc.h
 .\objects\main.o: Syscall\syscall.h
 .\objects\main.o: Syscall\sec_core.h
-.\objects\main.o: Syscall\usb_hid.h
+.\objects\main.o: Syscall\rgb_led.h
+.\objects\main.o: Syscall\ch340_comm.h
 .\objects\main.o: D:\software\Keil_v5\ARM\ARMCC\Bin\..\include\string.h

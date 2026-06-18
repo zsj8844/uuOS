@@ -118,6 +118,8 @@ void SecCore_HMAC_SHA256(const uint8_t *key, uint32_t key_len,
  *   5. 验证失败 → g_ChallengeFailCount++, ≥3 次 → STATE_CORE_PANIC
  */
 uint8_t SecCore_VerifyChallenge(const uint8_t *challenge_buf, uint32_t challenge_len);
+uint8_t SecCore_VerifyHandshake(const uint8_t *challenge_buf, uint32_t challenge_len,
+                                const uint8_t *mk, uint32_t mk_len);
 
 /**
  * @brief  派生会话密钥 SK
